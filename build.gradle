@@ -3,7 +3,6 @@ plugins {
 }
 
 repositories {
-	mavenLocal()
 	maven {
 		url = 'https://repo.runelite.net'
 		content {
@@ -11,10 +10,14 @@ repositories {
 		}
 	}
 	mavenCentral()
+	// Keep locally published RuneLite snapshots available for contributors, but
+	// prefer complete upstream modules so a stale ~/.m2 cache cannot strand a
+	// newly added native classifier.
+	mavenLocal()
 }
 
 def runeLiteVersion = 'latest.release'
-def pluginMainClass = 'com.example.ExamplePluginTest'
+def pluginMainClass = 'net.wchb.runelite.WchbPluginTest'
 
 dependencies {
 	compileOnly group: 'net.runelite', name:'client', version: runeLiteVersion
@@ -27,7 +30,7 @@ dependencies {
 	testImplementation group: 'net.runelite', name:'jshell', version: runeLiteVersion
 }
 
-group = 'com.example'
+group = 'net.wchb.runelite'
 
 tasks.withType(JavaCompile).configureEach {
 	options.encoding = 'UTF-8'
