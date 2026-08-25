@@ -20,6 +20,7 @@ import javax.swing.JButton;
 import javax.swing.JComponent;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
+import javax.swing.JScrollPane;
 import javax.swing.SwingConstants;
 import javax.swing.JTextArea;
 import javax.swing.SwingUtilities;
@@ -41,13 +42,18 @@ class WchbPanel extends PluginPanel
 
 	private final WchbPlugin plugin;
 	private final ItemManager itemManager;
+	private final JPanel contentPanel = new JPanel();
 	private final JLabel status = new JLabel("Connection disabled");
 	private final JLabel player = new JLabel("No WCHB profile connected");
 	private final JLabel connectHint = paragraph("Enable Connect to WCHB in the plugin settings to continue.");
 	private final JPanel onboardingPanel = new JPanel();
 	private final JPanel dashboardPanel = new JPanel();
+	private final JPanel dinkWarningPanel = new JPanel();
+	private final JLabel dinkWarningText = paragraph("");
 	private final JPanel setupPanel = new JPanel();
 	private final JPanel guidePanel = new JPanel();
+	private final JPanel changelogPanel = new JPanel();
+	private final JPanel changelogContent = new JPanel();
 	private final JPanel claimPanel = new JPanel();
 	private final JPanel recentPanel = new JPanel();
 	private final JPanel events = new JPanel();
@@ -69,7 +75,10 @@ class WchbPanel extends PluginPanel
 	private boolean profileCreated;
 	private boolean webhookCopied;
 	private boolean dinkConnected;
+	private boolean dinkHealthy = true;
 	private boolean guideDismissed;
+	private boolean guideOpenedFromDashboard;
+	private boolean claimVisibleBeforeAlternateView;
 
 	WchbPanel(WchbPlugin plugin, ItemManager itemManager)
 	{
@@ -79,24 +88,27 @@ class WchbPanel extends PluginPanel
 		setLayout(new BorderLayout());
 		setBackground(ColorScheme.DARK_GRAY_COLOR);
 
-		JPanel content = new JPanel();
-		content.setLayout(new BoxLayout(content, BoxLayout.Y_AXIS));
-		content.setBorder(BorderFactory.createEmptyBorder(14, 4, 14, 4));
-		content.setBackground(ColorScheme.DARK_GRAY_COLOR);
+		contentPanel.setLayout(new BoxLayout(contentPanel, BoxLayout.Y_AXIS));
+		contentPanel.setBorder(BorderFactory.createEmptyBorder(14, 10, 14, 10));
+		contentPanel.setBackground(ColorScheme.DARK_GRAY_COLOR);
 
 		buildOnboardingPanel();
 		buildDashboardPanel();
+		buildDinkWarningPanel();
 		buildSetupPanel();
 		buildGuidePanel();
+		buildChangelogPanel();
 		buildClaimPanel();
 		buildRecentPanel();
-		content.add(onboardingPanel);
-		content.add(dashboardPanel);
-		content.add(setupPanel);
-		content.add(guidePanel);
-		content.add(claimPanel);
-		content.add(recentPanel);
-		add(content, BorderLayout.NORTH);
+		contentPanel.add(onboardingPanel);
+		contentPanel.add(dashboardPanel);
+		contentPanel.add(dinkWarningPanel);
+		contentPanel.add(setupPanel);
+		contentPanel.add(guidePanel);
+		contentPanel.add(claimPanel);
+		contentPanel.add(recentPanel);
+		add(contentPanel, BorderLayout.NORTH);
+		add(changelogPanel, BorderLayout.CENTER);
 
 		showOnboarding();
 	}
@@ -151,15 +163,6 @@ class WchbPanel extends PluginPanel
 
 		onboardingPanel.add(section("DINK + PRIVACY"));
 		onboardingPanel.add(paragraph("Dink is the established Plugin Hub notifier that privately sends your loot to WCHB. We store the character, loot, and fictional-profile data needed for the experience—never Jagex credentials, chat, nearby players, or gameplay inputs."));
-		onboardingPanel.add(Box.createVerticalStrut(7));
-		JButton viewGuide = new JButton("Dink setup & privacy");
-		viewGuide.setAlignmentX(LEFT_ALIGNMENT);
-		viewGuide.setMaximumSize(new Dimension(Integer.MAX_VALUE, 30));
-		viewGuide.addActionListener(event ->
-		{
-			openGuide();
-		});
-		onboardingPanel.add(viewGuide);
 		onboardingPanel.add(Box.createVerticalStrut(11));
 
 		onboardingPanel.add(section("START YOUR FICTIONAL PROFILE"));
@@ -204,9 +207,9 @@ class WchbPanel extends PluginPanel
 		buttons.setBackground(ColorScheme.DARK_GRAY_COLOR);
 		buttons.setMaximumSize(new Dimension(Integer.MAX_VALUE, 92));
 		buttons.setAlignmentX(LEFT_ALIGNMENT);
-		JButton refresh = new JButton("Refresh");
-		refresh.addActionListener(event -> plugin.refreshNow());
-		buttons.add(refresh);
+		JButton changelog = new JButton("Changelog");
+		changelog.addActionListener(event -> openChangelog());
+		buttons.add(changelog);
 		JButton open = new JButton("Open WCHB");
 		open.addActionListener(event -> LinkBrowser.browse("https://wchb.net"));
 		buttons.add(open);
@@ -218,6 +221,36 @@ class WchbPanel extends PluginPanel
 		buttons.add(guide);
 		dashboardPanel.add(buttons);
 		dashboardPanel.add(Box.createVerticalStrut(14));
+	}
+
+	private void buildDinkWarningPanel()
+	{
+		Color warning = new Color(224, 164, 80);
+		dinkWarningPanel.setLayout(new BoxLayout(dinkWarningPanel, BoxLayout.Y_AXIS));
+		dinkWarningPanel.setBackground(new Color(35, 30, 24));
+		dinkWarningPanel.setBorder(BorderFactory.createCompoundBorder(
+			BorderFactory.createMatteBorder(0, 3, 0, 0, warning),
+			BorderFactory.createEmptyBorder(10, 10, 10, 8)));
+		dinkWarningPanel.setAlignmentX(LEFT_ALIGNMENT);
+
+		JLabel title = new JLabel("DINK NEEDS ATTENTION");
+		title.setForeground(warning);
+		title.setFont(title.getFont().deriveFont(Font.BOLD, 12f));
+		title.setAlignmentX(LEFT_ALIGNMENT);
+		dinkWarningPanel.add(title);
+		dinkWarningPanel.add(Box.createVerticalStrut(6));
+
+		dinkWarningText.setAlignmentX(LEFT_ALIGNMENT);
+		dinkWarningPanel.add(dinkWarningText);
+		dinkWarningPanel.add(Box.createVerticalStrut(8));
+
+		JButton guide = new JButton("Open Dink setup guide");
+		guide.setAlignmentX(LEFT_ALIGNMENT);
+		guide.setMaximumSize(new Dimension(Integer.MAX_VALUE, 30));
+		guide.addActionListener(event -> openGuide());
+		dinkWarningPanel.add(guide);
+		dinkWarningPanel.add(Box.createVerticalStrut(10));
+		dinkWarningPanel.setVisible(false);
 	}
 
 	private void buildSetupPanel()
@@ -290,20 +323,23 @@ class WchbPanel extends PluginPanel
 		navigation.setBackground(ColorScheme.DARKER_GRAY_COLOR);
 		guideBack.addActionListener(event -> showGuidePage(guidePage - 1));
 		JButton close = new JButton("Close");
-		close.addActionListener(event ->
-		{
-			guideDismissed = true;
-			guidePanel.setVisible(false);
-		});
+		close.addActionListener(event -> closeGuide());
 		guideNext.addActionListener(event ->
 		{
 			if (guidePage == 4)
 			{
-				guideDismissed = true;
-				guidePanel.setVisible(false);
-				showDashboard();
-				setupPanel.setVisible(false);
-				claimPanel.setVisible(true);
+				if (guideOpenedFromDashboard)
+				{
+					closeGuide();
+				}
+				else
+				{
+					guideDismissed = true;
+					guidePanel.setVisible(false);
+					showDashboard();
+					setupPanel.setVisible(false);
+					claimPanel.setVisible(true);
+				}
 				return;
 			}
 			showGuidePage(guidePage + 1);
@@ -314,6 +350,97 @@ class WchbPanel extends PluginPanel
 		guidePanel.add(navigation, BorderLayout.SOUTH);
 		showGuidePage(0);
 		updateChecklist();
+	}
+
+	private void buildChangelogPanel()
+	{
+		changelogPanel.setLayout(new BorderLayout());
+		changelogPanel.setBackground(ColorScheme.DARK_GRAY_COLOR);
+		changelogPanel.setBorder(BorderFactory.createEmptyBorder(14, 10, 0, 10));
+
+		changelogContent.setLayout(new BoxLayout(changelogContent, BoxLayout.Y_AXIS));
+		changelogContent.setBackground(ColorScheme.DARK_GRAY_COLOR);
+		changelogContent.setBorder(BorderFactory.createEmptyBorder(0, 0, 30, 0));
+		changelogContent.setAlignmentX(LEFT_ALIGNMENT);
+
+		JLabel title = new JLabel("WCHB CHANGELOG");
+		title.setForeground(Color.WHITE);
+		title.setFont(title.getFont().deriveFont(Font.BOLD, 15f));
+		title.setAlignmentX(LEFT_ALIGNMENT);
+		changelogContent.add(title);
+		changelogContent.add(Box.createVerticalStrut(4));
+		changelogContent.add(paragraph("What has changed in the RuneLite companion."));
+		changelogContent.add(Box.createVerticalStrut(12));
+
+		// Add each release here, newest first, whenever the plugin is updated in a PR.
+		addChangelogEntry("25 August 2026", new String[]
+		{
+			"Added four overlay styles: Default, Always Visible, Vs, and Classic. Default uses an animated drawer reveal that collapses back to the WCHB medallion.",
+			"Added temporary reveal and opacity options, plus improved first-time overlay sizing and placement.",
+			"Improved overlay clarity with a sharper logo, adaptive NPC-name sizing, cleaner multi-item layouts, and corrected dice animation.",
+			"Added Dink setup health warnings and clearer help when loot delivery needs attention.",
+			"Improved existing-account linking so completed browser connections are detected without restarting the plugin.",
+			"Refined onboarding, sidebar spacing, recent-reroll cards, and item-icon loading.",
+			"Added this dated in-plugin changelog."
+		}, true);
+
+		changelogContent.add(Box.createVerticalStrut(12));
+		JButton back = new JButton("Back to rerolls");
+		back.setAlignmentX(LEFT_ALIGNMENT);
+		back.setMaximumSize(new Dimension(Integer.MAX_VALUE, 32));
+		back.addActionListener(event -> closeChangelog());
+		changelogContent.add(back);
+		changelogContent.add(Box.createVerticalStrut(18));
+
+		JScrollPane scrollPane = new JScrollPane(
+			changelogContent,
+			JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED,
+			JScrollPane.HORIZONTAL_SCROLLBAR_NEVER);
+		scrollPane.setBorder(null);
+		// Do not let the expanded release body become the preferred height of
+		// RuneLite's sidebar (which can resize the game canvas/window).
+		scrollPane.setPreferredSize(new Dimension(0, 0));
+		scrollPane.setMinimumSize(new Dimension(0, 0));
+		scrollPane.getViewport().setBackground(ColorScheme.DARK_GRAY_COLOR);
+		scrollPane.getVerticalScrollBar().setUnitIncrement(16);
+		changelogPanel.add(scrollPane, BorderLayout.CENTER);
+		changelogPanel.setVisible(false);
+	}
+
+	private void addChangelogEntry(String date, String[] changes, boolean expanded)
+	{
+		JButton header = new JButton((expanded ? "\u25BE  " : "\u25B8  ") + date);
+		header.setHorizontalAlignment(SwingConstants.LEFT);
+		header.setAlignmentX(LEFT_ALIGNMENT);
+		header.setMaximumSize(new Dimension(Integer.MAX_VALUE, 34));
+
+		JPanel body = new JPanel();
+		body.setLayout(new BoxLayout(body, BoxLayout.Y_AXIS));
+		body.setBackground(ColorScheme.DARKER_GRAY_COLOR);
+		body.setBorder(BorderFactory.createCompoundBorder(
+			BorderFactory.createMatteBorder(0, 3, 0, 0, RED),
+			BorderFactory.createEmptyBorder(9, 9, 9, 5)));
+		body.setAlignmentX(LEFT_ALIGNMENT);
+		for (String change : changes)
+		{
+			JLabel bullet = paragraph("&#8226;&nbsp; " + change);
+			bullet.setBorder(BorderFactory.createEmptyBorder(0, 0, 7, 0));
+			body.add(bullet);
+		}
+		body.setVisible(expanded);
+
+		header.addActionListener(event ->
+		{
+			boolean show = !body.isVisible();
+			body.setVisible(show);
+			header.setText((show ? "\u25BE  " : "\u25B8  ") + date);
+			changelogContent.revalidate();
+			changelogContent.repaint();
+		});
+		changelogContent.add(header);
+		changelogContent.add(Box.createVerticalStrut(5));
+		changelogContent.add(body);
+		changelogContent.add(Box.createVerticalStrut(8));
 	}
 
 	private void buildClaimPanel()
@@ -345,8 +472,57 @@ class WchbPanel extends PluginPanel
 	private void openGuide()
 	{
 		guideDismissed = false;
+		guideOpenedFromDashboard = dashboardPanel.isVisible() || recentPanel.isVisible();
+		if (guideOpenedFromDashboard)
+		{
+			claimVisibleBeforeAlternateView = claimPanel.isVisible();
+			dashboardPanel.setVisible(false);
+			dinkWarningPanel.setVisible(false);
+			setupPanel.setVisible(false);
+			claimPanel.setVisible(false);
+			recentPanel.setVisible(false);
+			changelogPanel.setVisible(false);
+		}
+		dinkWarningPanel.setVisible(false);
 		guidePanel.setVisible(true);
 		showGuidePage(profileCreated ? 1 : 0);
+	}
+
+	private void closeGuide()
+	{
+		guideDismissed = true;
+		guidePanel.setVisible(false);
+		if (guideOpenedFromDashboard)
+		{
+			guideOpenedFromDashboard = false;
+			showDashboard();
+			claimPanel.setVisible(claimVisibleBeforeAlternateView);
+		}
+		updateDinkWarningVisibility();
+	}
+
+	private void openChangelog()
+	{
+		claimVisibleBeforeAlternateView = claimPanel.isVisible();
+		contentPanel.setVisible(false);
+		onboardingPanel.setVisible(false);
+		dashboardPanel.setVisible(false);
+		dinkWarningPanel.setVisible(false);
+		setupPanel.setVisible(false);
+		guidePanel.setVisible(false);
+		claimPanel.setVisible(false);
+		recentPanel.setVisible(false);
+		changelogPanel.setVisible(true);
+		changelogPanel.revalidate();
+		changelogPanel.repaint();
+	}
+
+	private void closeChangelog()
+	{
+		changelogPanel.setVisible(false);
+		contentPanel.setVisible(true);
+		showDashboard();
+		claimPanel.setVisible(claimVisibleBeforeAlternateView);
 	}
 
 	private void showGuidePage(int page)
@@ -430,6 +606,7 @@ class WchbPanel extends PluginPanel
 			? "Connection enabled. Create your temporary profile to continue."
 			: "First enable Connect to WCHB in the plugin settings and accept RuneLite's network warning."));
 		updateChecklist();
+		updateDinkWarningVisibility();
 	}
 
 	void updateStatus(String text)
@@ -446,8 +623,17 @@ class WchbPanel extends PluginPanel
 		claimPanel.revalidate();
 	}
 
+	void updateDinkHealth(boolean ready, String message)
+	{
+		dinkHealthy = ready;
+		dinkWarningText.setText(wrap(message == null ? "" : message));
+		updateDinkWarningVisibility();
+	}
+
 	void updateFeed(WchbFeed feed)
 	{
+		boolean alternateDashboardView = changelogPanel.isVisible()
+			|| (guideOpenedFromDashboard && guidePanel.isVisible());
 		boolean justConnected = !dinkConnected && feed.isDinkConnected();
 		profileCreated = true;
 		dinkConnected = feed.isDinkConnected();
@@ -462,12 +648,24 @@ class WchbPanel extends PluginPanel
 		}
 		else
 		{
-			showDashboard();
 			setupPanel.setVisible(false);
-			claimPanel.setVisible("unclaimed".equals(feed.getProfileStatus()));
+			boolean showClaim = "unclaimed".equals(feed.getProfileStatus());
+			if (alternateDashboardView)
+			{
+				claimVisibleBeforeAlternateView = showClaim;
+				claimPanel.setVisible(false);
+			}
+			else
+			{
+				showDashboard();
+				claimPanel.setVisible(showClaim);
+			}
 			if (justConnected)
 			{
-				guidePanel.setVisible(false);
+				if (!guideOpenedFromDashboard)
+				{
+					guidePanel.setVisible(false);
+				}
 			}
 		}
 		populateEvents(feed.getEvents());
@@ -500,29 +698,47 @@ class WchbPanel extends PluginPanel
 
 	private void showOnboarding()
 	{
+		contentPanel.setVisible(true);
 		onboardingPanel.setVisible(true);
 		dashboardPanel.setVisible(false);
+		dinkWarningPanel.setVisible(false);
 		setupPanel.setVisible(false);
 		guidePanel.setVisible(false);
+		changelogPanel.setVisible(false);
 		claimPanel.setVisible(false);
 		recentPanel.setVisible(false);
 	}
 
 	private void showDashboard()
 	{
+		contentPanel.setVisible(true);
 		onboardingPanel.setVisible(false);
 		dashboardPanel.setVisible(true);
+		changelogPanel.setVisible(false);
 		recentPanel.setVisible(true);
+		updateDinkWarningVisibility();
 	}
 
 	private void showSetupMode()
 	{
+		contentPanel.setVisible(true);
 		onboardingPanel.setVisible(false);
 		dashboardPanel.setVisible(false);
+		dinkWarningPanel.setVisible(false);
 		setupPanel.setVisible(true);
 		guidePanel.setVisible(!guideDismissed);
+		changelogPanel.setVisible(false);
 		claimPanel.setVisible(false);
 		recentPanel.setVisible(false);
+	}
+
+	private void updateDinkWarningVisibility()
+	{
+		boolean show = connectionEnabled && profileCreated && dashboardPanel.isVisible()
+			&& !guidePanel.isVisible() && !dinkHealthy;
+		dinkWarningPanel.setVisible(show);
+		dinkWarningPanel.revalidate();
+		dinkWarningPanel.repaint();
 	}
 
 	private void showWebhook(String url)
@@ -613,7 +829,10 @@ class WchbPanel extends PluginPanel
 		{
 			for (WchbItem item : items)
 			{
-				if (item == null || item.getId() <= 0) continue;
+				if (item == null || item.getId() <= 0)
+				{
+					continue;
+				}
 				AsyncBufferedImage image = itemManager.getImage(item.getId(), Math.max(1, item.getQuantity()), false);
 				JLabel icon = new JLabel();
 				icon.setPreferredSize(new Dimension(28, 28));

@@ -9,10 +9,11 @@ The reroll is fictional. WCHB never changes your real items, account, odds, or g
 The plugin is a native RuneLite companion for [WCHB.net](https://wchb.net). It provides:
 
 - a movable in-game overlay for the latest real drop and WCHB reroll;
-- a minimal single-line layout by default, with a configurable full layout and size;
-- a short dice reveal when a new reroll arrives;
+- four overlay presentations: the animated **Default** drawer, **Always Visible**, **Vs**, and **Classic**;
+- configurable size and opacity, plus an optional temporary mode that dismisses each reveal after five seconds;
+- a focused dice reveal in the WCHB result area when a new reroll arrives;
 - enhanced reveals for WCHB big-value, unique, and pet results; and
-- a live sidebar feed containing the eight most recent rerolls.
+- a live sidebar feed containing the eight most recent rerolls, setup guidance, Dink health warnings, and an in-plugin changelog.
 
 Dink remains solely responsible for detecting loot and sending it to WCHB. This plugin does not duplicate Dink, inspect gameplay to collect drops, automate actions, or influence combat.
 
@@ -48,7 +49,7 @@ The plugin keeps the in-client experience intentionally light. WCHB.net provides
 5. The first Dink event associates the temporary profile with that character and begins its fictional loot journey.
 6. Optionally claim the profile on WCHB.net later to access the full website.
 
-Already use WCHB.net? Select **Connect existing account** instead, sign in on WCHB.net, and approve the connection. The plugin also remembers character connections locally so it can reconnect the correct profile on later launches.
+Already use WCHB.net? Select **Connect existing account** instead, sign in on WCHB.net, and approve the connection. RuneLite detects the completed browser link while the connection window is open. The plugin also remembers character connections locally so it can reconnect the correct profile on later launches.
 
 Installing the plugin alone does not collect loot. Dink only sends events after the player deliberately configures the generated webhook.
 
@@ -69,8 +70,10 @@ Network access is disabled by default. The plugin only contacts WCHB after **Con
 
 ## Configuration
 
-- **Minimal overlay** is enabled by default.
+- **Overlay style** defaults to the animated **Default** drawer reveal; **Always Visible**, **Vs**, and **Classic** are also available.
 - **Overlay size** ranges from 60% to 140%.
+- **Overlay opacity** ranges from transparent to fully opaque and defaults to the current full-opacity appearance.
+- **Temporary overlay** dismisses the complete reveal five seconds after each reroll.
 - **Unlock overlay movement** temporarily enables dragging; RuneLite stores the chosen location for that RuneLite profile.
 - **Show overlay** can hide the in-game card without disconnecting the sidebar feed.
 
