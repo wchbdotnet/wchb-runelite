@@ -7,6 +7,9 @@ import java.awt.Rectangle;
 import java.awt.event.MouseEvent;
 import java.security.SecureRandom;
 import java.util.Base64;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import javax.inject.Inject;
 import javax.swing.SwingUtilities;
@@ -25,6 +28,7 @@ import net.runelite.client.input.MouseListener;
 import net.runelite.client.input.MouseManager;
 import net.runelite.client.plugins.Plugin;
 import net.runelite.client.plugins.PluginDescriptor;
+import net.runelite.client.plugins.PluginManager;
 import net.runelite.client.ui.ClientToolbar;
 import net.runelite.client.ui.NavigationButton;
 import net.runelite.client.ui.overlay.OverlayManager;
@@ -41,6 +45,11 @@ import net.wchb.runelite.model.WchbEvent;
 )
 public class WchbPlugin extends Plugin implements MouseListener
 {
+	private static final long ACCOUNT_LINK_POLL_SECONDS = 1L;
+	private static final long ACCOUNT_LINK_TIMEOUT_SECONDS = 60L;
+	private static final int DINK_HEALTH_CHECK_TICKS = 5;
+	private static final String DINK_CONFIG_GROUP = "dinkplugin";
+
 	@Inject private WchbConfig config;
 	@Inject private WchbApiClient apiClient;
 	@Inject private WchbLiveClient liveClient;
@@ -48,11 +57,13 @@ public class WchbPlugin extends Plugin implements MouseListener
 	@Inject private OverlayManager overlayManager;
 	@Inject private ClientToolbar clientToolbar;
 	@Inject private ConfigManager configManager;
+	@Inject private PluginManager pluginManager;
 	@Inject private ClientThread clientThread;
 	@Inject private WchbConnectionStore connectionStore;
 	@Inject private Client client;
 	@Inject private ItemManager itemManager;
 	@Inject private MouseManager mouseManager;
+	@Inject private ScheduledExecutorService executor;
 
 	@Getter
 	private volatile WchbFeed feed;
@@ -65,16 +76,22 @@ public class WchbPlugin extends Plugin implements MouseListener
 	private final AtomicBoolean reconnectLookupInFlight = new AtomicBoolean();
 	private volatile boolean reconnectAttempted;
 	private volatile boolean running;
+	private volatile String pendingAccountLinkToken;
+	private volatile long accountLinkDeadlineNanos;
+	private ScheduledFuture<?> accountLinkPollTask;
 	private boolean draggingOverlay;
 	private Point overlayDragOffset;
+	private int dinkHealthTick;
 
 	@Override
 	protected void startUp()
 	{
 		running = true;
+		migrateRemovedOverlayStyles();
 		BufferedImage icon = ImageUtil.loadImageResource(WchbPlugin.class, "/wchb.png");
 		panel = new WchbPanel(this, itemManager);
 		panel.setConnectionEnabled(config.connectToWchb());
+		refreshDinkHealth();
 		navigationButton = NavigationButton.builder()
 			.tooltip("What Could Have Been")
 			.icon(icon)
@@ -106,6 +123,7 @@ public class WchbPlugin extends Plugin implements MouseListener
 		else
 		{
 			currentPlayerName = null;
+			stopAccountLinkPolling();
 			liveClient.stop();
 		}
 	}
@@ -119,12 +137,18 @@ public class WchbPlugin extends Plugin implements MouseListener
 			reconnectAttempted = false;
 			refreshNow();
 		}
+		if (++dinkHealthTick >= DINK_HEALTH_CHECK_TICKS)
+		{
+			dinkHealthTick = 0;
+			refreshDinkHealth();
+		}
 	}
 
 	@Override
 	protected void shutDown()
 	{
 		running = false;
+		stopAccountLinkPolling();
 		refreshInFlight.set(false);
 		reconnectLookupInFlight.set(false);
 		liveClient.stop();
@@ -143,6 +167,10 @@ public class WchbPlugin extends Plugin implements MouseListener
 	@Subscribe
 	public void onConfigChanged(ConfigChanged event)
 	{
+		if (DINK_CONFIG_GROUP.equals(event.getGroup()) || "runelite".equals(event.getGroup()))
+		{
+			refreshDinkHealth();
+		}
 		if (WchbConfig.GROUP.equals(event.getGroup()))
 		{
 			if ("unlockOverlay".equals(event.getKey()))
@@ -155,7 +183,109 @@ public class WchbPlugin extends Plugin implements MouseListener
 				panel.setConnectionEnabled(config.connectToWchb());
 			}
 			liveClient.stop();
-			if (config.connectToWchb() && isLoggedIn()) refreshNow();
+			if (!config.connectToWchb())
+			{
+				stopAccountLinkPolling();
+			}
+			if (config.connectToWchb() && isLoggedIn())
+			{
+				refreshNow();
+			}
+		}
+	}
+
+	private void refreshDinkHealth()
+	{
+		if (panel == null)
+		{
+			return;
+		}
+
+		DinkHealth health = assessDinkHealth();
+		SwingUtilities.invokeLater(() ->
+		{
+			if (panel != null)
+			{
+				panel.updateDinkHealth(health.ready, health.message);
+			}
+		});
+	}
+
+	private DinkHealth assessDinkHealth()
+	{
+		if (!isDinkActive())
+		{
+			return DinkHealth.warning(
+				"Dink is not running. Install or enable Dink in the Plugin Hub so WCHB can receive your loot.");
+		}
+
+		String lootEnabled = configManager.getConfiguration(DINK_CONFIG_GROUP, "lootEnabled");
+		if (!Boolean.parseBoolean(lootEnabled))
+		{
+			return DinkHealth.warning(
+				"Dink is running, but its Loot notifier is disabled. Enable Loot in Dink's settings.");
+		}
+
+		String lootWebhook = configManager.getConfiguration(DINK_CONFIG_GROUP, "lootWebhook");
+		if (lootWebhook == null || lootWebhook.trim().isEmpty())
+		{
+			return DinkHealth.warning(
+				"Dink's Loot Webhook Override is empty. Open the setup guide and paste your private WCHB webhook.");
+		}
+
+		String minLootValue = configManager.getConfiguration(DINK_CONFIG_GROUP, "minLootValue");
+		try
+		{
+			if (minLootValue == null || Integer.parseInt(minLootValue.trim()) != 1)
+			{
+				return DinkHealth.warning(
+					"Dink's Min Loot Value must be 1, otherwise smaller drops will not reach WCHB.");
+			}
+		}
+		catch (NumberFormatException ignored)
+		{
+			return DinkHealth.warning(
+				"Dink's Min Loot Value could not be read. Open Dink settings and set it to 1.");
+		}
+
+		return DinkHealth.ready();
+	}
+
+	private boolean isDinkActive()
+	{
+		for (Plugin installedPlugin : pluginManager.getPlugins())
+		{
+			Class<?> type = installedPlugin.getClass();
+			PluginDescriptor descriptor = type.getAnnotation(PluginDescriptor.class);
+			boolean isDink = type.getName().startsWith("dinkplugin.")
+				|| descriptor != null && "Dink".equalsIgnoreCase(descriptor.name());
+			if (isDink)
+			{
+				return pluginManager.isPluginActive(installedPlugin);
+			}
+		}
+		return false;
+	}
+
+	private static final class DinkHealth
+	{
+		private final boolean ready;
+		private final String message;
+
+		private DinkHealth(boolean ready, String message)
+		{
+			this.ready = ready;
+			this.message = message;
+		}
+
+		private static DinkHealth ready()
+		{
+			return new DinkHealth(true, "");
+		}
+
+		private static DinkHealth warning(String message)
+		{
+			return new DinkHealth(false, message);
 		}
 	}
 
@@ -196,31 +326,35 @@ public class WchbPlugin extends Plugin implements MouseListener
 		{
 			return;
 		}
-			WchbEvent newest = result.getEvents() == null || result.getEvents().isEmpty()
-				? null : result.getEvents().get(0);
-			if (newest != null)
+		if (isPendingAccountLink(token))
+		{
+			stopAccountLinkPolling();
+		}
+		WchbEvent newest = result.getEvents() == null || result.getEvents().isEmpty()
+			? null : result.getEvents().get(0);
+		if (newest != null)
+		{
+			if (lastEventId != null && !lastEventId.equals(newest.getId()))
 			{
-				if (lastEventId != null && !lastEventId.equals(newest.getId()))
-				{
-					overlay.playNewEvent(newest);
-				}
-				lastEventId = newest.getId();
+				overlay.playNewEvent(newest);
 			}
-			feed = result;
-			connectionStore.remember(currentPlayerName, token);
-			connectionStore.remember(result.getPlayerName(), token);
-			liveClient.start(result.getLiveUrl(),
-				event -> clientThread.invoke(() -> acceptLiveEvent(event)),
-				this::updateStatus,
-				() -> clientThread.invoke(this::refreshNow),
-				() -> clientThread.invoke(this::refreshNow));
-			SwingUtilities.invokeLater(() ->
+			lastEventId = newest.getId();
+		}
+		feed = result;
+		connectionStore.remember(currentPlayerName, token);
+		connectionStore.remember(result.getPlayerName(), token);
+		liveClient.start(result.getLiveUrl(),
+			event -> clientThread.invoke(() -> acceptLiveEvent(event)),
+			this::updateStatus,
+			() -> clientThread.invoke(this::refreshNow),
+			() -> clientThread.invoke(this::refreshNow));
+		SwingUtilities.invokeLater(() ->
+		{
+			if (panel != null)
 			{
-				if (panel != null)
-				{
-					panel.updateFeed(result);
-				}
-			});
+				panel.updateFeed(result);
+			}
+		});
 	}
 
 	private void acceptFeedError(String token, String error)
@@ -233,7 +367,14 @@ public class WchbPlugin extends Plugin implements MouseListener
 		}
 		if ("Connection token not recognised".equals(error))
 		{
-			attemptSavedReconnect(token);
+			if (isPendingAccountLink(token))
+			{
+				updateStatus("Waiting for browser connection…");
+			}
+			else
+			{
+				attemptSavedReconnect(token);
+			}
 		}
 		else
 		{
@@ -284,11 +425,17 @@ public class WchbPlugin extends Plugin implements MouseListener
 		apiClient.registerProfile(installationToken,
 			registration -> clientThread.invoke(() ->
 			{
-				if (!running || !config.connectToWchb()) return;
+				if (!running || !config.connectToWchb())
+				{
+					return;
+				}
 				configManager.setConfiguration(WchbConfig.GROUP, "connectionToken", installationToken);
 				SwingUtilities.invokeLater(() ->
 				{
-					if (panel != null) panel.updateRegistration(registration);
+					if (panel != null)
+					{
+						panel.updateRegistration(registration);
+					}
 				});
 				refreshNow();
 			}), this::updateStatus);
@@ -298,13 +445,63 @@ public class WchbPlugin extends Plugin implements MouseListener
 	{
 		String token = ensureInstallationToken();
 		LinkBrowser.browse("https://wchb.net/connect-runelite?token=" + token);
-		updateStatus("WCHB account connection opened in your browser");
+		startAccountLinkPolling(token);
+		updateStatus("Waiting for WCHB account connection…");
+	}
+
+	private synchronized void startAccountLinkPolling(String token)
+	{
+		stopAccountLinkPolling();
+		pendingAccountLinkToken = token;
+		accountLinkDeadlineNanos = System.nanoTime()
+			+ TimeUnit.SECONDS.toNanos(ACCOUNT_LINK_TIMEOUT_SECONDS);
+		accountLinkPollTask = executor.scheduleWithFixedDelay(
+			() -> clientThread.invoke(() -> pollForAccountLink(token)),
+			ACCOUNT_LINK_POLL_SECONDS,
+			ACCOUNT_LINK_POLL_SECONDS,
+			TimeUnit.SECONDS);
+	}
+
+	private void pollForAccountLink(String token)
+	{
+		if (!running || !isLoggedIn() || !config.connectToWchb()
+			|| !token.equals(config.connectionToken().trim()))
+		{
+			stopAccountLinkPolling();
+			return;
+		}
+		if (System.nanoTime() >= accountLinkDeadlineNanos)
+		{
+			stopAccountLinkPolling();
+			updateStatus("Connection not detected. Use Connect existing account to try again.");
+			return;
+		}
+		refreshNow();
+	}
+
+	private boolean isPendingAccountLink(String token)
+	{
+		return token != null && token.equals(pendingAccountLinkToken);
+	}
+
+	private synchronized void stopAccountLinkPolling()
+	{
+		pendingAccountLinkToken = null;
+		accountLinkDeadlineNanos = 0L;
+		if (accountLinkPollTask != null)
+		{
+			accountLinkPollTask.cancel(false);
+			accountLinkPollTask = null;
+		}
 	}
 
 	private String ensureInstallationToken()
 	{
 		String token = config.connectionToken().trim();
-		if (token.length() == 43) return token;
+		if (token.length() == 43)
+		{
+			return token;
+		}
 		byte[] bytes = new byte[32];
 		new SecureRandom().nextBytes(bytes);
 		token = Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);
@@ -354,9 +551,35 @@ public class WchbPlugin extends Plugin implements MouseListener
 		return config.overlayScale();
 	}
 
+	int getOverlayOpacity()
+	{
+		return config.overlayOpacity();
+	}
+
+	boolean isTemporaryOverlay()
+	{
+		return config.temporaryOverlay();
+	}
+
 	boolean isMinimalOverlay()
 	{
 		return config.minimalOverlay();
+	}
+
+	WchbOverlayStyle getOverlayStyle()
+	{
+		WchbOverlayStyle style = config.overlayStyle();
+		return style == null ? WchbOverlayStyle.DRAWER : style;
+	}
+
+	private void migrateRemovedOverlayStyles()
+	{
+		String savedStyle = configManager.getConfiguration(WchbConfig.GROUP, "overlayStyle");
+		if ("COMPACT".equals(savedStyle) || "STACKED".equals(savedStyle))
+		{
+			configManager.setConfiguration(WchbConfig.GROUP, "overlayStyle",
+				WchbOverlayStyle.DRAWER);
+		}
 	}
 
 	boolean isOverlayMovementUnlocked()
@@ -367,9 +590,15 @@ public class WchbPlugin extends Plugin implements MouseListener
 	@Override
 	public MouseEvent mousePressed(MouseEvent event)
 	{
-		if (!config.unlockOverlay() || !shouldShowOverlay()) return event;
+		if (!config.unlockOverlay() || !shouldShowOverlay())
+		{
+			return event;
+		}
 		Rectangle bounds = overlay.getBounds();
-		if (bounds == null || !bounds.contains(event.getPoint())) return event;
+		if (bounds == null || !bounds.contains(event.getPoint()))
+		{
+			return event;
+		}
 		draggingOverlay = true;
 		overlayDragOffset = new Point(event.getX() - bounds.x, event.getY() - bounds.y);
 		return null;
@@ -378,7 +607,10 @@ public class WchbPlugin extends Plugin implements MouseListener
 	@Override
 	public MouseEvent mouseDragged(MouseEvent event)
 	{
-		if (!draggingOverlay || overlayDragOffset == null) return event;
+		if (!draggingOverlay || overlayDragOffset == null)
+		{
+			return event;
+		}
 		overlay.setPosition(net.runelite.client.ui.overlay.OverlayPosition.DYNAMIC);
 		overlay.setPreferredLocation(new Point(
 			event.getX() - overlayDragOffset.x,
@@ -390,7 +622,10 @@ public class WchbPlugin extends Plugin implements MouseListener
 	@Override
 	public MouseEvent mouseReleased(MouseEvent event)
 	{
-		if (!draggingOverlay) return event;
+		if (!draggingOverlay)
+		{
+			return event;
+		}
 		draggingOverlay = false;
 		overlayDragOffset = null;
 		overlayManager.saveOverlay(overlay);
@@ -404,15 +639,24 @@ public class WchbPlugin extends Plugin implements MouseListener
 
 	private void acceptLiveEvent(WchbEvent event)
 	{
-		if (!isLoggedIn() || feed == null || event == null) return;
-		if (lastEventId != null && lastEventId.equals(event.getId())) return;
+		if (!isLoggedIn() || feed == null || event == null)
+		{
+			return;
+		}
+		if (lastEventId != null && lastEventId.equals(event.getId()))
+		{
+			return;
+		}
 		lastEventId = event.getId();
 		feed.markDinkConnected();
 		feed.prependEvent(event);
 		overlay.playNewEvent(event);
 		SwingUtilities.invokeLater(() ->
 		{
-			if (panel != null) panel.updateFeed(feed);
+			if (panel != null)
+			{
+				panel.updateFeed(feed);
+			}
 		});
 	}
 
