@@ -561,6 +561,11 @@ public class WchbPlugin extends Plugin implements MouseListener
 		return config.temporaryOverlay();
 	}
 
+	boolean isHighlightedRevealsOnly()
+	{
+		return config.highlightedRevealsOnly();
+	}
+
 	boolean isMinimalOverlay()
 	{
 		return config.minimalOverlay();
