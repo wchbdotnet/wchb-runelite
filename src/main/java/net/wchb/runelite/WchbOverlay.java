@@ -111,11 +111,16 @@ class WchbOverlay extends Overlay
 		}
 
 		WchbEvent event = hasEvent ? feed.getEvents().get(0) : null;
-		// Drawer Reveal owns its visibility lifecycle: its medallion remains on
-		// screen while the rails themselves are temporary.
-		boolean temporary = plugin.isTemporaryOverlay() && !drawer;
 		long elapsed = animationStarted == 0L
 			? Long.MAX_VALUE : System.currentTimeMillis() - animationStarted;
+		boolean highlightedOnly = plugin.isHighlightedRevealsOnly();
+		if (highlightedOnly && (animationStarted == 0L || !isHighlightedRevealType(revealType)))
+		{
+			return null;
+		}
+		// Drawer Reveal owns its visibility lifecycle: its medallion remains on
+		// screen while the rails themselves are temporary.
+		boolean temporary = (plugin.isTemporaryOverlay() || highlightedOnly) && !drawer;
 		long rollDuration = temporary ? TEMPORARY_ROLL_DURATION_MS : ROLL_DURATION_MS;
 		long animationElapsed = drawer && elapsed != Long.MAX_VALUE
 			? Math.max(0L, elapsed - DRAWER_OPEN_MS) : elapsed;
@@ -123,6 +128,10 @@ class WchbOverlay extends Overlay
 			+ DRAWER_RESULT_HOLD_MS;
 		float drawerProgress = drawer ? drawerProgress(elapsed, drawerCloseStart) : 1f;
 		long temporaryFadeStart = rollDuration + RESULT_FADE_MS + TEMPORARY_RESULT_HOLD_MS;
+		if (highlightedOnly && drawer && elapsed >= drawerCloseStart + DRAWER_CLOSE_MS)
+		{
+			return null;
+		}
 		if (temporary && (animationStarted == 0L
 			|| elapsed >= temporaryFadeStart + TEMPORARY_FADE_OUT_MS))
 		{
@@ -269,6 +278,11 @@ class WchbOverlay extends Overlay
 			output.dispose();
 		}
 		return new Dimension(renderedWidth, renderedHeight);
+	}
+
+	static boolean isHighlightedRevealType(String type)
+	{
+		return type != null && !type.trim().isEmpty() && !"normal".equalsIgnoreCase(type.trim());
 	}
 
 	private BufferedImage prepareOverlayBuffer(int width, int height)

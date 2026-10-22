@@ -52,6 +52,16 @@ public interface WchbConfig extends Config
 		return false;
 	}
 
+	@ConfigItem(
+		keyName = "highlightedRevealsOnly",
+		name = "Highlighted reveals only",
+		description = "Keep the in-game overlay hidden unless a reroll qualifies for the glowing highlight"
+	)
+	default boolean highlightedRevealsOnly()
+	{
+		return false;
+	}
+
 	@Range(min = 60, max = 140)
 	@ConfigItem(
 		keyName = "overlayScale",

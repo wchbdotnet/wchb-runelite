@@ -6,9 +6,21 @@ import net.wchb.runelite.model.WchbFeed;
 import org.junit.Test;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertTrue;
 
 public class WchbModelTest
 {
+	@Test
+	public void recognisesOnlyGlowWorthyRevealTypes()
+	{
+		assertFalse(WchbOverlay.isHighlightedRevealType(null));
+		assertFalse(WchbOverlay.isHighlightedRevealType(""));
+		assertFalse(WchbOverlay.isHighlightedRevealType(" normal "));
+		assertTrue(WchbOverlay.isHighlightedRevealType("rare"));
+		assertTrue(WchbOverlay.isHighlightedRevealType("jackpot"));
+	}
+
 	private final Gson gson = new Gson();
 
 	@Test
